@@ -168,6 +168,11 @@ let map_addr (addr:quad) : int option =
 *)
 (* Stuff for step func *)
 
+(* Interprets Operands *)
+let interp_op (op:operand) (m:mach) : int64 = match op with
+| Imm -> 
+| Reg ->
+| 
 
 let step (m:mach) : unit =
 failwith "step unimplemented"
