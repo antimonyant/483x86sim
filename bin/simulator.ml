@@ -168,14 +168,149 @@ let map_addr (addr:quad) : int option =
 *)
 (* Stuff for step func *)
 
+let range_check (num:int64) : int =
+match map_addr num with
+| None -> raise X86lite_segfault
+| Some a -> a
+
+let get_range (addr:int64) (m:mach) : int64 =
+  let data = int64_of_sbytes [m.mem.(range_check addr); m.mem.(range_check (Int64.add addr 1L));
+  m.mem.(range_check (Int64.add addr 2L)); 
+  m.mem.(range_check (Int64.add addr 3L));
+  m.mem.(range_check (Int64.add addr 4L)); 
+  m.mem.(range_check (Int64.add addr 5L));
+  m.mem.(range_check (Int64.add addr 6L)); 
+  m.mem.(range_check (Int64.add addr 7L))]
+  in data
+
 (* Interprets Operands *)
-let interp_op (op:operand) (m:mach) : int64 = match op with
-| Imm -> 
-| Reg ->
-| 
+let interp_op (m:mach) (op_list:operand list) (num:int) : int64 = 
+(* Use List.nth to get nth element of list for dest and src *)
+let op = List.nth op_list num in
+match op with
+| Imm i -> 
+  begin
+  (* Get i as a quad somehow *)
+  match i with
+  | Lit i -> i
+  | Lbl i -> failwith "interp_op shouldn't be here1"
+  end
+| Reg reg -> m.regs.(rind reg)
+| Ind1 i ->
+  let data = 
+  begin
+  match i with
+  | Lit i -> i
+  | Lbl i -> failwith "interp_op shouldn't be here2"
+  end
+  in get_range data m
+| Ind2 reg -> let data = m.regs.(rind reg) in get_range data m
+| Ind3 (i, reg) -> 
+  let data = 
+  begin
+    match i with
+    | Lit i -> Int64.add i m.regs.(rind reg)
+    | Lbl i -> failwith "interp_op shouldn't be here3"
+  end
+  in get_range data m
+
+let set_flags (m:mach) (flag:Int64_overflow.t) : unit =
+  m.flags.fo <- flag.Int64_overflow.overflow;
+  (* set if value is 0 *)
+  m.flags.fz <- flag.Int64_overflow.value = 0L;
+  (* Shift to get MSB, set if equal to 1 *)
+  m.flags.fs <- (Int64.shift_right_logical flag.Int64_overflow.value 63) = 1L
+
+let set_value (m:mach) (op_list:operand list) (num:int) (data:int64) : unit =
+  let op = List.nth op_list num in
+  let data_to_set = Array.of_list (sbytes_of_int64 data) in
+  let length = Array.length data_to_set in
+  match op with
+  | Reg reg -> m.regs.(rind reg) <- data
+  | Ind1 ind1 ->
+    let immop = 
+      begin
+      match ind1 with
+      | Lit i -> i
+      | Lbl i -> failwith "set_value shouldn't be here1"
+      end
+      in 
+    let index = range_check immop in
+    Array.blit data_to_set 0 m.mem index length
+  | Ind2 ind2 -> let index = range_check m.regs.(rind ind2) in 
+    Array.blit data_to_set 0 m.mem index length
+  | Ind3 (ind3, reg) -> 
+    let immop = 
+      begin
+        match ind3 with
+        | Lit i -> Int64.add i m.regs.(rind reg)
+        | Lbl i -> failwith "set_value shouldn't be here2"
+      end
+      in 
+    let index = range_check immop in
+    Array.blit data_to_set 0 m.mem index length
+  | _ -> failwith "set_value should not be here3"
+
+let arithmetic (m:mach) (instr:ins) : unit = 
+let opcode, operator_list = instr in
+match opcode with
+| Negq -> 
+  let dest = interp_op m operator_list 0 in 
+  let value = Int64_overflow.neg dest in
+  set_value m operator_list 0 value.Int64_overflow.value;
+  set_flags m value;
+  if dest = Int64.min_int then m.flags.fo <- true
+| Addq -> 
+  let dest = interp_op m operator_list 0 in 
+  let src = interp_op m operator_list 1 in
+  let value = Int64_overflow.add dest src in
+  set_value m operator_list 1 value.Int64_overflow.value;
+  set_flags m value;
+| Subq -> failwith "add S"
+| Imulq 
+| Incq 
+| Decq
+| _ -> failwith "arithmetic should not be here"
+
+let logic (m:mach) (instr:ins) : unit = failwith "TODO"
+
+let bit_manip (m:mach) (instr:ins) : unit = failwith "TODO"
+
+let data_mov (m:mach) (instr:ins) : unit = failwith "TODO"
+
+let control_flow (m:mach) (instr:ins) : unit = failwith "TODO"
+
+let choose_instruction (m:mach) (instr:ins) : unit = 
+let opcode, operator_list = instr in
+match opcode with 
+| Negq | Addq | Subq | Imulq | Incq | Decq -> arithmetic m instr; 
+m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+| Notq | Andq | Orq | Xorq -> logic m instr;
+m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+| Sarq | Shlq | Shrq -> bit_manip m instr;
+m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+| Set s -> bit_manip m instr;
+m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+| Leaq | Movq | Pushq | Popq -> data_mov m instr;
+m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+| Cmpq | Jmp | Callq | Retq -> control_flow m instr
+| J j -> control_flow m instr
+
+let read_first_byte (m:mach) (b:sbyte) : unit = 
+match b with
+| InsB0 instr -> choose_instruction m instr
+(* If InsFrag, need to move until InsB0 *)
+| InsFrag -> m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 1L
+| Byte dontcare -> ()
 
 let step (m:mach) : unit =
-failwith "step unimplemented"
+let get_instr = m.regs.(rind Rip) in
+let check_range = map_addr get_instr in
+let addr = 
+  match check_range with
+  | None -> raise X86lite_segfault
+  | Some a -> a
+in read_first_byte m m.mem.(addr)
 
 (* Runs the machine until the rip register reaches a designated
    memory address. Returns the contents of %rax when the 
