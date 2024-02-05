@@ -261,13 +261,23 @@ match opcode with
   set_flags m value;
   if dest = Int64.min_int then m.flags.fo <- true
 | Addq -> 
-  let dest = interp_op m operator_list 0 in 
-  let src = interp_op m operator_list 1 in
+  let src = interp_op m operator_list 0 in 
+  let dest = interp_op m operator_list 1 in
   let value = Int64_overflow.add dest src in
   set_value m operator_list 1 value.Int64_overflow.value;
   set_flags m value;
-| Subq -> failwith "add S"
-| Imulq 
+| Subq ->   
+  let src = interp_op m operator_list 0 in 
+  let dest = interp_op m operator_list 1 in
+  let value = Int64_overflow.sub dest src in
+  set_value m operator_list 1 value.Int64_overflow.value;
+  set_flags m value;
+| Imulq ->
+  let src = interp_op m operator_list 0 in 
+  let reg = interp_op m operator_list 1 in
+  let value = Int64_overflow.mul reg src in
+  set_value m operator_list 1 value.Int64_overflow.value;
+  set_flags m value;
 | Incq 
 | Decq
 | _ -> failwith "arithmetic should not be here"
@@ -276,7 +286,15 @@ let logic (m:mach) (instr:ins) : unit = failwith "TODO"
 
 let bit_manip (m:mach) (instr:ins) : unit = failwith "TODO"
 
-let data_mov (m:mach) (instr:ins) : unit = failwith "TODO"
+let data_mov (m:mach) (instr:ins) : unit = 
+let opcode, operator_list = instr in
+match opcode with
+| Leaq 
+| Movq -> let src = interp_op m operator_list 0 in 
+set_value m operator_list 1 src;
+| Pushq 
+| Popq
+| _ -> failwith "data_mov should not be here"
 
 let control_flow (m:mach) (instr:ins) : unit = failwith "TODO"
 
