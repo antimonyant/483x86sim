@@ -316,13 +316,41 @@ match opcode with
     set_flags m (Int64_overflow.ok xor)
 | _ -> failwith "logic should not be here"
 
+let msb2_check (dest:int64) : bool =
+  (* Get top 2 bits and check if equal*)
+  Int64.shift_right_logical dest 63 = Int64.logand (Int64.shift_right_logical dest 62) 1L
+
 let bit_manip (m:mach) (instr:ins) : unit = 
 let opcode, operator_list = instr in
 match opcode with
-| Sarq -> failwith "bit_manip should not be here"
-| Shlq -> failwith "bit_manip should not be here"
-| Shrq -> failwith "bit_manip should not be here"
-| Set s -> failwith "bit_manip should not be here"
+| Sarq -> 
+  let amt = interp_op m operator_list 0 in
+  let dest = interp_op m operator_list 1 in
+  let shift = Int64.shift_right dest (Int64.to_int amt) in
+    set_value m operator_list 1 shift;
+    if (Int64.to_int amt) <> 0 then set_flags m (Int64_overflow.ok shift);
+    if (Int64.to_int amt) = 1 then m.flags.fo <- false
+| Shlq -> 
+  let amt = interp_op m operator_list 0 in
+  let dest = interp_op m operator_list 1 in
+  let shift = Int64.shift_left dest (Int64.to_int amt) in
+    set_value m operator_list 1 shift;
+    if (Int64.to_int amt) <> 0 then set_flags m (Int64_overflow.ok shift);
+    if (Int64.to_int amt) = 1 then 
+      if msb2_check dest then m.flags.fo <- false 
+      else m.flags.fo <- true
+| Shrq -> 
+  let amt = interp_op m operator_list 0 in
+  let dest = interp_op m operator_list 1 in
+  let shift = Int64.shift_right_logical dest (Int64.to_int amt) in
+    set_value m operator_list 1 shift;
+    if (Int64.to_int amt) <> 0 then set_flags m (Int64_overflow.ok shift);
+    if (Int64.to_int amt) = 1 then
+      if Int64.shift_right_logical dest 63 = 1L then m.flags.fo <- true
+      else m.flags.fo <- false
+| Set s -> 
+  if interp_cnd m.flags s then set_value m operator_list 0 1L
+  else set_value m operator_list 0 0L (* change to change last byte only *)
 | _ -> failwith "bit_manip should not be here"
 
 let data_mov (m:mach) (instr:ins) : unit = 
@@ -332,8 +360,15 @@ match opcode with
   set_value m operator_list 1 ind;
 | Movq -> let src = interp_op m operator_list 0 in 
   set_value m operator_list 1 src;
-| Pushq 
-| Popq
+| Pushq -> 
+  let src = interp_op m operator_list 0 in 
+    m.regs.(rind Rsp) <- Int64.sub m.regs.(rind Rsp) 8L;
+    (* Use Ind2 to address Rsp *)
+    set_value m [Ind2 Rsp] 0 src
+| Popq ->
+  let dest = interp_op m [Ind2 Rsp] 0 in 
+    set_value m operator_list 0 dest;
+    m.regs.(rind Rsp) <- Int64.add m.regs.(rind Rsp) 8L
 | _ -> failwith "data_mov should not be here"
 
 let control_flow (m:mach) (instr:ins) : unit = 
@@ -358,7 +393,7 @@ match opcode with
 | Set s -> bit_manip m instr;
   m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
 | Leaq | Movq | Pushq | Popq -> data_mov m instr;
-  m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+  m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L;
 | Cmpq | Jmp | Callq | Retq -> control_flow m instr
 | J j -> control_flow m instr
 
