@@ -166,6 +166,7 @@ let map_addr (addr:quad) : int option =
     - update the registers and/or memory appropriately
     - set the condition flags
 *)
+
 (* Stuff for step func *)
 
 let range_check (num:int64) : int =
@@ -257,60 +258,107 @@ match opcode with
 | Negq -> 
   let dest = interp_op m operator_list 0 in 
   let value = Int64_overflow.neg dest in
-  set_value m operator_list 0 value.Int64_overflow.value;
-  set_flags m value;
-  if dest = Int64.min_int then m.flags.fo <- true
+    set_value m operator_list 0 value.Int64_overflow.value;
+    set_flags m value;
+    if dest = Int64.min_int then m.flags.fo <- true
 | Addq -> 
   let src = interp_op m operator_list 0 in 
   let dest = interp_op m operator_list 1 in
   let value = Int64_overflow.add dest src in
-  set_value m operator_list 1 value.Int64_overflow.value;
-  set_flags m value;
+    set_value m operator_list 1 value.Int64_overflow.value;
+    set_flags m value
 | Subq ->   
   let src = interp_op m operator_list 0 in 
   let dest = interp_op m operator_list 1 in
   let value = Int64_overflow.sub dest src in
-  set_value m operator_list 1 value.Int64_overflow.value;
-  set_flags m value;
+    set_value m operator_list 1 value.Int64_overflow.value;
+    set_flags m value
 | Imulq ->
   let src = interp_op m operator_list 0 in 
   let reg = interp_op m operator_list 1 in
   let value = Int64_overflow.mul reg src in
-  set_value m operator_list 1 value.Int64_overflow.value;
-  set_flags m value;
-| Incq 
-| Decq
+    set_value m operator_list 1 value.Int64_overflow.value;
+    set_flags m value
+| Incq -> 
+  let dest = interp_op m operator_list 0 in 
+    set_value m operator_list 1 (Int64_overflow.succ dest).Int64_overflow.value;
+    set_flags m (Int64_overflow.succ dest)
+| Decq ->
+  let dest = interp_op m operator_list 0 in 
+    set_value m operator_list 1 (Int64_overflow.pred dest).Int64_overflow.value;
+    set_flags m (Int64_overflow.pred dest);
+    if dest = Int64.min_int then m.flags.fo <- true
 | _ -> failwith "arithmetic should not be here"
 
-let logic (m:mach) (instr:ins) : unit = failwith "TODO"
+let logic (m:mach) (instr:ins) : unit = 
+let opcode, operator_list = instr in
+match opcode with
+| Notq -> 
+  let dest = interp_op m operator_list 0 in 
+    set_value m operator_list 0 (Int64.lognot dest)
+| Andq ->
+  let src = interp_op m operator_list 0 in 
+  let dest = interp_op m operator_list 1 in 
+  let aand = Int64.logand dest src in
+    set_value m operator_list 1 aand;
+    set_flags m (Int64_overflow.ok aand)
+| Orq ->
+  let src = interp_op m operator_list 0 in 
+  let dest = interp_op m operator_list 1 in 
+  let oor = Int64.logor dest src in
+    set_value m operator_list 1 oor;
+    set_flags m (Int64_overflow.ok oor)
+| Xorq ->
+  let src = interp_op m operator_list 0 in 
+  let dest = interp_op m operator_list 1 in 
+  let xor = Int64.logor dest src in
+    set_value m operator_list 1 xor;
+    set_flags m (Int64_overflow.ok xor)
+| _ -> failwith "logic should not be here"
 
-let bit_manip (m:mach) (instr:ins) : unit = failwith "TODO"
+let bit_manip (m:mach) (instr:ins) : unit = 
+let opcode, operator_list = instr in
+match opcode with
+| Sarq -> failwith "bit_manip should not be here"
+| Shlq -> failwith "bit_manip should not be here"
+| Shrq -> failwith "bit_manip should not be here"
+| Set s -> failwith "bit_manip should not be here"
+| _ -> failwith "bit_manip should not be here"
 
 let data_mov (m:mach) (instr:ins) : unit = 
 let opcode, operator_list = instr in
 match opcode with
-| Leaq 
+| Leaq -> let ind = interp_op m operator_list 0 in
+  set_value m operator_list 1 ind;
 | Movq -> let src = interp_op m operator_list 0 in 
-set_value m operator_list 1 src;
+  set_value m operator_list 1 src;
 | Pushq 
 | Popq
 | _ -> failwith "data_mov should not be here"
 
-let control_flow (m:mach) (instr:ins) : unit = failwith "TODO"
+let control_flow (m:mach) (instr:ins) : unit = 
+let opcode, operator_list = instr in
+match opcode with
+| Cmpq -> failwith "control_flow should not be here"
+| Jmp -> failwith "control_flow should not be here"
+| Callq -> failwith "control_flow should not be here"
+| Retq -> failwith "control_flow should not be here"
+| J j -> failwith "control_flow should not be here"
+| _ -> failwith "control_flow should not be here"
 
 let choose_instruction (m:mach) (instr:ins) : unit = 
 let opcode, operator_list = instr in
 match opcode with 
 | Negq | Addq | Subq | Imulq | Incq | Decq -> arithmetic m instr; 
-m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+  m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
 | Notq | Andq | Orq | Xorq -> logic m instr;
-m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+  m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
 | Sarq | Shlq | Shrq -> bit_manip m instr;
-m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+  m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
 | Set s -> bit_manip m instr;
-m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+  m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
 | Leaq | Movq | Pushq | Popq -> data_mov m instr;
-m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
+  m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
 | Cmpq | Jmp | Callq | Retq -> control_flow m instr
 | J j -> control_flow m instr
 
