@@ -272,7 +272,8 @@ match opcode with
   let dest = interp_op m operator_list 1 in
   let value = Int64_overflow.sub dest src in
     set_value m operator_list 1 value.Int64_overflow.value;
-    set_flags m value
+    set_flags m value;
+    if src = Int64.min_int then m.flags.fo <- true
 | Imulq ->
   let src = interp_op m operator_list 0 in 
   let reg = interp_op m operator_list 1 in
@@ -374,7 +375,12 @@ match opcode with
 let control_flow (m:mach) (instr:ins) : unit = 
 let opcode, operator_list = instr in
 match opcode with
-| Cmpq -> failwith "control_flow should not be here"
+| Cmpq -> 
+  let src1 = interp_op m operator_list 0 in 
+  let src2 = interp_op m operator_list 1 in 
+  let value = Int64_overflow.sub src2 src1 in
+    set_flags m value;
+    if src1 = Int64.min_int then m.flags.fo <- true
 | Jmp -> failwith "control_flow should not be here"
 | Callq -> failwith "control_flow should not be here"
 | Retq -> failwith "control_flow should not be here"
