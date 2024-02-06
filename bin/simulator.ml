@@ -321,6 +321,37 @@ let msb2_check (dest:int64) : bool =
   (* Get top 2 bits and check if equal*)
   Int64.shift_right_logical dest 63 = Int64.logand (Int64.shift_right_logical dest 62) 1L
 
+(* let change_byte (m:mach) (op_list:operand list) (num:int) (data:int64) : unit =
+let op = List.nth op_list num in
+match op with
+| Reg reg -> m.regs.(rind reg) <- data
+| Ind1 ind1 ->
+  let immop = 
+  begin
+  match ind1 with
+  | Lit i -> i
+  | Lbl i -> failwith "change_byte shouldn't be here1"
+  end
+  in 
+  let index = range_check immop in
+  let bytes : sbyte list = sbytes_of_int64 data
+  in m.mem.(index) <- List.nth bytes 0
+| Ind2 ind2 -> let index = range_check m.regs.(rind ind2) in 
+  let bytes : sbyte list = sbytes_of_int64 data
+  in m.mem.(index) <- List.nth bytes 0
+| Ind3 (ind3, reg) -> 
+  let immop = 
+  begin
+  match ind3 with
+  | Lit i -> Int64.add i m.regs.(rind reg)
+  | Lbl i -> failwith "change_byte shouldn't be here2"
+  end
+  in
+  let index = range_check immop in
+  let bytes : sbyte list = sbytes_of_int64 data
+  in m.mem.(index) <- List.nth bytes 0
+| _ -> failwith "change_byte should not be here3" *)
+
 let bit_manip (m:mach) (instr:ins) : unit = 
 let opcode, operator_list = instr in
 match opcode with
@@ -381,10 +412,26 @@ match opcode with
   let value = Int64_overflow.sub src2 src1 in
     set_flags m value;
     if src1 = Int64.min_int then m.flags.fo <- true
-| Jmp -> failwith "control_flow should not be here"
-| Callq -> failwith "control_flow should not be here"
-| Retq -> failwith "control_flow should not be here"
-| J j -> failwith "control_flow should not be here"
+| Jmp -> let src = interp_op m operator_list 0 in m.regs.(rind Rip) <- src
+| Callq ->
+  m.regs.(rind Rip) <- Int64.add m.regs.(rind Rsp) 8L;
+  begin
+  let src = interp_op m [Reg Rip] 0 in 
+    m.regs.(rind Rsp) <- Int64.sub m.regs.(rind Rsp) 8L;
+    (* Use Ind2 to address Rsp *)
+    set_value m [Ind2 Rsp] 0 src
+  end;
+  (* jump to given location *)
+  let call_loc = interp_op m operator_list 0 in m.regs.(rind Rip) <- call_loc
+| Retq -> 
+  let dest = interp_op m [Ind2 Rsp] 0 in 
+    set_value m [Reg Rip] 0 dest;
+    m.regs.(rind Rsp) <- Int64.add m.regs.(rind Rsp) 8L
+| J j -> 
+  let src = interp_op m operator_list 0 in
+    if interp_cnd m.flags j then
+    m.regs.(rind Rip) <- src
+    else m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 8L
 | _ -> failwith "control_flow should not be here"
 
 let choose_instruction (m:mach) (instr:ins) : unit = 
