@@ -188,7 +188,7 @@ match op_list with
 | h::tl -> 
     if index = 0 then h 
     else get_element tl (Int.sub index 1)
-| [] -> 
+| [] -> failwith "something"
 
 (* Interprets Operands *)
 let interp_op (m:mach) (op_list:operand list) (num:int) : int64 = 
@@ -317,7 +317,7 @@ match opcode with
 | Xorq ->
   let src = interp_op m operator_list 0 in 
   let dest = interp_op m operator_list 1 in 
-  let xor = Int64.logor dest src in
+  let xor = Int64.logxor dest src in
     set_value m operator_list 1 xor;
     set_flags m (Int64_overflow.ok xor)
 | _ -> failwith "logic should not be here"
@@ -454,15 +454,18 @@ match b with
 (* If InsFrag, need to move until InsB0 *)
 | InsFrag -> m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 1L
 | Byte dontcare -> ()
-  
+
 let step (m:mach) : unit =
-let get_instr = m.regs.(rind Rip) in
-let check_range = map_addr get_instr in
-let addr = 
-  match check_range with
-  | None -> raise X86lite_segfault
-  | Some a -> a
-  in read_first_byte m m.mem.(addr)
+  try
+  let get_instr = m.regs.(rind Rip) in
+  let check_range = map_addr get_instr in
+  let addr = 
+    match check_range with
+    | None -> raise X86lite_segfault
+    | Some a -> a
+    in read_first_byte m m.mem.(addr)
+  with 
+  |_ -> m.regs.(rind Rip) <- exit_addr (*; print_endline "list empty"*)
 
 (* Runs the machine until the rip register reaches a designated
    memory address. Returns the contents of %rax when the 
