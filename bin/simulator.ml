@@ -285,7 +285,7 @@ let range_check (num:int64) : int =
       set_flags m (Int64_overflow.succ dest)
   | Decq ->
     let dest = interp_op m operator_list 0 in 
-      set_value m operator_list 1 (Int64_overflow.pred dest).Int64_overflow.value;
+      set_value m operator_list 0 (Int64_overflow.pred dest).Int64_overflow.value;
       set_flags m (Int64_overflow.pred dest);
       if dest = Int64.min_int then m.flags.fo <- true
   | _ -> failwith "arithmetic should not be here"
