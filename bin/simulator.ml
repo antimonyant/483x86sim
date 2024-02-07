@@ -320,7 +320,7 @@ let range_check (num:int64) : int =
     (* Get top 2 bits and check if equal*)
     Int64.shift_right_logical dest 63 = Int64.logand (Int64.shift_right_logical dest 62) 1L
   
-  (* let change_byte (m:mach) (op_list:operand list) (num:int) (data:int64) : unit =
+  let change_byte (m:mach) (op_list:operand list) (num:int) (data:int64) : unit =
   let op = List.nth op_list num in
   match op with
   | Reg reg -> m.regs.(rind reg) <- data
@@ -349,7 +349,7 @@ let range_check (num:int64) : int =
     let index = range_check immop in
     let bytes : sbyte list = sbytes_of_int64 data
     in m.mem.(index) <- List.nth bytes 0
-  | _ -> failwith "change_byte should not be here3" *)
+  | _ -> failwith "change_byte should not be here3"
   
   let bit_manip (m:mach) (instr:ins) : unit = 
   let opcode, operator_list = instr in
@@ -380,8 +380,8 @@ let range_check (num:int64) : int =
         if Int64.shift_right_logical dest 63 = 1L then m.flags.fo <- true
         else m.flags.fo <- false
   | Set s -> 
-    if interp_cnd m.flags s then set_value m operator_list 0 1L
-    else set_value m operator_list 0 0L (* change to change last byte only *)
+    if interp_cnd m.flags s then change_byte m operator_list 0 1L
+    else change_byte m operator_list 0 0L (* change to change last byte only *)
   | _ -> failwith "bit_manip should not be here"
   
   let data_mov (m:mach) (instr:ins) : unit = 
@@ -412,16 +412,14 @@ let range_check (num:int64) : int =
       set_flags m value;
       if src1 = Int64.min_int then m.flags.fo <- true
   | Jmp -> let src = interp_op m operator_list 0 in m.regs.(rind Rip) <- src
-  | Callq ->
-    m.regs.(rind Rip) <- Int64.add m.regs.(rind Rsp) ins_size;
-    begin
-    let src = interp_op m [Reg Rip] 0 in 
-      m.regs.(rind Rsp) <- Int64.sub m.regs.(rind Rsp) ins_size;
-      (* Use Ind2 to address Rsp *)
-      set_value m [Ind2 Rsp] 0 src
-    end;
-    (* jump to given location *)
-    let call_loc = interp_op m operator_list 0 in m.regs.(rind Rip) <- call_loc
+      | Callq ->
+        m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) ins_size;
+        let src = interp_op m [Reg Rip] 0 in 
+          m.regs.(rind Rsp) <- Int64.sub m.regs.(rind Rsp) 8L;
+          (* Use Ind2 to address Rsp *)
+          set_value m [Ind2 Rsp] 0 src;
+        (* jump to given location *)
+        let call_loc = interp_op m operator_list 0 in m.regs.(rind Rip) <- call_loc
   | Retq -> 
     let dest = interp_op m [Ind2 Rsp] 0 in 
       set_value m [Reg Rip] 0 dest;
@@ -448,7 +446,9 @@ let range_check (num:int64) : int =
     m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) ins_size;
   | Cmpq -> control_flow m instr;
     m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) ins_size;
-  | Jmp | Callq | Retq -> control_flow m instr
+  | Jmp -> control_flow m instr
+  | Callq -> control_flow m instr
+  | Retq -> control_flow m instr
   | J j -> control_flow m instr
 
 let read_first_byte (m:mach) (b:sbyte) : unit = 
@@ -509,120 +509,164 @@ exception Redefined_sym of lbl
     Need text size to get data position so need to get sizes first
   *)
 
-  let get_data_size (size:int64) (data:data) : int64 =
-    match data with
-    | Asciz string -> 
-      (* Gets length of matched string zero terminated*)
-      let string_len = Int64.add 1L (Int64.of_int (String.length string)) in
-      Int64.add string_len size
-    | Quad imm -> 
-      match imm with
-      | Lit i -> Int64.add 8L size
-      | Lbl b -> Int64.add 1L (Int64.of_int (String.length b))
-    
-     (* get both sizes at once *)
-    let get_sizes (sizes:(int64 * int64)) (elem:elem) : int64 * int64 =
-    let text_size, data_size = sizes in
-    match elem.asm with
-      (* Text size is 4 times the instruction list *)
-    | Text text -> Int64.add text_size (Int64.of_int ((List.length text) * 4)), data_size
-      (* Data has different sizes*)
-    | Data data -> text_size, Int64.add data_size (List.fold_left get_data_size 0L data)
-    
-    (* Need type for symbol table *)
-    type symtable = lbl * quad
-    
-    (* Used this to get a sbyte list because I couldn't figure out how otherwise *)
-    let change_type (datas:sbyte list) (data:data) : sbyte list =
-      datas @ (sbytes_of_data data)
-    
-    let rec lookup_addr (label:lbl) (symbol_table:symtable list) : int64 =
-      match symbol_table with
-      | (lbl, addr)::tl -> if lbl = label then addr else lookup_addr label tl
-      | [] -> raise (Undefined_sym label)
-    
-    let rec lookup (label:lbl) (symbol_table:symtable list) : bool =
-    match symbol_table with
-    | (lbl, addr)::tl -> if lbl = label then true else lookup lbl tl
-    | _ -> false
-    
-    let symbols_for_text (duple:int64 * symtable list) (p:elem) : (int64 * symtable list) =
-    let text_size, symbol_table = duple in
-    match p.asm with 
-    | Text text -> 
-      let label = p.lbl in
-      let updated_symbol_table = 
-        if not (lookup label symbol_table) then symbol_table @ [(label, text_size)]
-        else raise (Redefined_sym label) in 
-      (Int64.add text_size (Int64.mul (Int64.of_int (List.length text)) 4L), updated_symbol_table)
-    | _ -> duple
-    
-    (* Need same parameters as return types?? *)
-    let symbols_for_data (tuple:int64 * symtable list * sbyte list) (p:elem) 
-    : (int64 * symtable list * sbyte list) = 
-    let text_size, symbol_table, datas = tuple in
-    match p.asm with
-    | Data data -> 
-      let label = p.lbl in
-      let update_symbol_table = symbol_table @ 
-        [(label, (Int64.add text_size (Int64.of_int (List.length datas))))] in
-      let update_datas = List.fold_left change_type datas data in 
-      (text_size, update_symbol_table, update_datas)
-      (* Don't change anything here 
-         but I don't think it will ever reach this case
-       *)
-    | _ -> tuple
-    
-    let litvslbl (symbol_table:symtable list) (imm:imm) : quad =
-    match imm with
-    | Lit l -> l 
-    | Lbl label -> 
-      let addr = lookup_addr label symbol_table in
-      Int64.add mem_bot addr
-    
-    let resolve_labels (duple:symtable list * operand list) (op:operand) 
-    : (symtable list  * operand list) = 
-      let symbol_table, operands = duple in
-      begin match op with
-      | Imm imm -> (symbol_table, operands @ [Imm (Lit (litvslbl symbol_table imm))])
-      | Reg reg -> (symbol_table, operands @ [Reg reg])
-      | Ind1 ind1 -> (symbol_table, operands @ [Ind1 (Lit (litvslbl symbol_table ind1))])
-      | Ind2 ind2 -> (symbol_table, operands @ [Ind2 ind2])
-      | Ind3 (im3,re3) -> (symbol_table, operands @ 
-        [Ind3 (Lit (litvslbl symbol_table im3), re3)])
+  type map = (lbl * quad) list
+  let data_size_helper (s:int64) (d:data) : int64 = 
+    begin match d with
+    | Asciz a -> 
+      let len = Int64.of_int (String.length a) in
+      Int64.add s (Int64.add 1L len)
+    | Quad q -> 
+      begin match q with
+      | Lit l -> Int64.add s 8L
+      | Lbl l -> 
+        let len = Int64.of_int (String.length l) in 
+        Int64.add len (Int64.add s 1L) 
       end
+    end
+  
+  
+  let compute_size (s:(int64 * int64)) (e:elem) : (int64 * int64) =
+    let size_t, size_d = s in
+    begin match e.asm with
+    | Text t -> 
+      let list_size = (Int64.of_int (List.length t)) in
+      (Int64.add size_t (Int64.mul list_size 8L), size_d)
+    | Data d -> (size_t, Int64.add size_d (List.fold_left data_size_helper 0L d))
+    end
+  
+  
+  let rec map_contains (m:map) (k:lbl) : bool =
+    begin match m with
+    | (x, y)::tl -> 
+      if x = k then true else map_contains tl k
+    | [] -> false
+    end
+  
+  let rec map_lookup (m:map) (k:lbl) : quad =
+    begin match m with
+    | (x, y)::tl -> 
+      if x = k then y else map_lookup tl k
+    | [] -> raise (Undefined_sym k)
+    end
+  
+  
+  let resolve_lbl_helper (m:map) (i:imm) : quad =
+    begin match i with
+    | Lit l -> l 
+    | Lbl l -> Int64.add mem_bot (map_lookup m l)
+    end
+  
+  let resolve_lbl (m:map * operand list) (o:operand) : (map * operand list) = 
+    let _map, oper_l = m in
+    begin match o with
+    | Ind1 x -> (_map, oper_l @ [Ind1 (Lit (resolve_lbl_helper _map x))])
+    | Ind3 (x,r) -> (_map, oper_l @ [Ind3 (Lit (resolve_lbl_helper _map x), r)])
+    | Imm x -> (_map, oper_l @ [Imm (Lit (resolve_lbl_helper _map x))])
+    | Reg r -> (_map, oper_l @ [Reg r])
+    | Ind2 i -> (_map, oper_l @ [Ind2 i])
+    end
+  
+  let patch_ins (m:map * sbyte list) (i:ins) : (map * sbyte list) =
+    (* _map = same symbol table; sbyte_l = accumlated sbyte list*)
+    let _map, sbyte_l = m in 
+    let op, opr_l = i in
+    let _, patched_opr_l = List.fold_left resolve_lbl (_map, []) opr_l in
+    (_map, sbyte_l @ sbytes_of_ins (op, patched_opr_l))
+  
+  
+  (* 
+      takes in symbol_map dictionary, sbyte list
+      match asm on text
+      replace lbls according to map, update sbyte list
+      if lbl not in map, exception
+  
+      return sbyte list
+    *)  
+  let handle_text (m:map * sbyte list) (e:elem) : (map * sbyte list) =
+    let _map, text_seg = m in
+    begin match e.asm with
+    (* fold on map, t with patch_ins*)
+    | Text t -> 
+      let new_new_map, patched_ins = List.fold_left patch_ins (_map, text_seg) t in
+      (new_new_map, patched_ins)
+    | _ -> m
+    end
+  
+  
+  
+  let handle_text_seg_labels (m:map * int64) (e:elem) : (map * int64) =
+    let _map, list_size = m in
+    begin match e.asm with
+    (* fold on map, t with patch_ins*)
+    | Text t -> 
+      let label = e.lbl in 
+      let new_map = 
+        if not (map_contains _map label) then 
+          _map @ [(label, list_size)]
+        else
+          raise (Redefined_sym label) in
+      (new_map, Int64.add list_size (Int64.mul (Int64.of_int (List.length t)) 8L))
+    | _ -> m
+    end
+  
+  let data_helper (l:sbyte list) (d:data): sbyte list =
+    l @ (sbytes_of_data d)
+  
+  (* 
+    takes in symbol_map dictionary, sbyte list
+    match asm on data
+    update map, sbyte list
     
-    let patch_text (duple:symtable list  * sbyte list) (instr:ins) : (symtable list  * sbyte list) =
-      let symbol_table, bytes = duple in 
-      let opcode, operands = instr in
-      let _, patched_opr_l = List.fold_left resolve_labels (symbol_table, []) operands in
-      (symbol_table, bytes @ sbytes_of_ins (opcode, patched_opr_l))
-    
-    let replace_lbls (duple:symtable list * sbyte list) (p:elem) : (symtable list * sbyte list) =
-    let symbol_table, texts = duple in
-    match p.asm with
-    | Text text -> 
-      let updated_symbol_table, patch = List.fold_left patch_text (symbol_table, texts) text in
-      (updated_symbol_table, patch)
-    | _ -> duple
-    
-    (* Create symbol table with text and data segments *)
-    let resolve_labels (text_size:int64) (p:prog) : (int64 * sbyte list * sbyte list) =
-    (* Start with empty symbol table *)
-    let text_size, symbol_table, datas = List.fold_left symbols_for_data (text_size, [], []) p in
-    let program_size, update_symbol_table = List.fold_left symbols_for_text (text_size, symbol_table) p in 
-    let replaced_lbls, texts = List.fold_left replace_lbls (update_symbol_table, []) p in
-    (* Look for main as the start *)
-    ((litvslbl update_symbol_table (Lbl "main")), texts, datas)
-    
-let assemble (p:prog) : exec =
-(* start with both sizes as 0 *)
-let text_size, data_size = List.fold_left get_sizes (0L, 0L) p in 
-let data_start = Int64.add mem_bot text_size in
-let start, texts, datas = resolve_labels text_size p in 
-{entry=start ; text_pos=mem_bot ; data_pos=data_start ; 
-text_seg=texts ; data_seg=datas}
-
+    return map, sbyte list
+  *)
+  let handle_data (t:int64 * map * sbyte list) 
+                  (e:elem) : (int64 * map * sbyte list) = 
+    begin match e.asm with
+      | Data d -> 
+        let size_text, _map, data_seg = t in
+        let label = e.lbl in
+        let new_map = 
+          if not (map_contains _map label) then 
+          (* update map *)
+            let list_size = Int64.of_int (List.length data_seg) in
+            _map @ [(label, (Int64.add size_text list_size))]
+          else
+            raise (Redefined_sym label) in
+        let new_data_seg = List.fold_left data_helper data_seg d in
+        (size_text, new_map, new_data_seg)
+      | _ -> t
+    end
+  (* first generates map and data segment *)
+  (* then folds on the program to generate text segment *)
+  (* return text_seg, data_seg *)
+  let resolve_symbols (p:prog) (s:int64) : (quad * sbyte list * sbyte list) =
+    let size_text = s in
+    let _, _map, data_seg = List.fold_left handle_data (size_text, [], []) p in
+    let new_map, t = List.fold_left handle_text_seg_labels (_map, 0L) p in
+    let _, text_seg = List.fold_left handle_text (new_map, []) p in
+    ((resolve_lbl_helper new_map (Lbl "main")), text_seg, data_seg)
+  
+  (* Convert an X86 program into an object file:
+     - separate the text and data segments
+     - compute the size of each segment
+        Note: the size of an Asciz string section is (1 + the string length)
+  
+     - resolve the labels to concrete addresses and 'patch' the instructions to 
+       replace Lbl values with the corresponding Imm values.
+  
+     - the text segment starts at the lowest address
+     - the data segment starts after the text segment
+  
+    HINT: List.fold_left and List.fold_right are your friends.
+   *)
+  let assemble (p:prog) : exec =
+    let size_text, size_data = List.fold_left compute_size (0L, 0L) p in
+    let main, text_seg, data_seg = resolve_symbols p size_text in
+      {entry=main; text_pos=mem_bot; 
+      data_pos=Int64.add mem_bot size_text;
+      text_seg=text_seg; data_seg=data_seg}
+  
+  
   (* Convert an object file into an executable machine state. 
       - allocate the mem array
       - set up the memory state by writing the symbolic bytes to the 
