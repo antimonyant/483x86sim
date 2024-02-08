@@ -326,6 +326,15 @@ let msb2_check (dest:int64) : bool =
   (* Get top 2 bits and check if equal*)
   Int64.shift_right_logical dest 63 = Int64.logand (Int64.shift_right_logical dest 62) 1L
 
+(*stuff for set byte
+  - very bad code but have to make it work *)
+let set_byte (op_list:operand list) (num:int) (m:mach) (data:int64) : unit =
+let op = get_element op_list num in
+match op with
+(* ocaml has hex -> clear last 8 bits to set with data *)
+| Reg reg -> m.regs.(rind reg) <- Int64.logor (Int64.logand m.regs.(rind reg) 0xFFFFFF00L) data
+| _ -> failwith "set_byte should not be here"
+
 let bit_manip (m:mach) (instr:ins) : unit = 
 let opcode, operator_list = instr in
 match opcode with
@@ -355,8 +364,8 @@ match opcode with
       if Int64.shift_right_logical dest 63 = 1L then m.flags.fo <- true
       else m.flags.fo <- false
 | Set s -> 
-  if interp_cnd m.flags s then set_value m operator_list 0 1L
-  else set_value m operator_list 0 0L (* change to change last byte only *)
+  if interp_cnd m.flags s then set_byte operator_list 0 m 1L 
+  else set_byte operator_list 0 m 0L  (* change to change last byte only *)
 | _ -> failwith "bit_manip should not be here"
   
 (* DEST ← addr(Ind) Load effective address so has to be handled differently*)
