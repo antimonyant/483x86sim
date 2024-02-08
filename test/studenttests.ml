@@ -22,35 +22,35 @@ let mov_ri =
  InsFrag;
  ]
 
-(*Euclid's Algorithm from 376*)
+(*Euclid's Algorithm from EECS 376*)
 let euclid_GCD x y = [ text "main"
                           [ Movq,  [~$x; ~%R08]
-					                ; Movq,  [~$y; ~%R09]
-					                ; Cmpq,  [~$0; ~%R08]
+				  ; Movq,  [~$y; ~%R09]
+				  ; Cmpq,  [~$0; ~%R08]
                           ; Cmpq,  [~$0; ~%R08]
                           ; J Eq,  [~$$"Exit"]
-					                ; Cmpq,  [~$0; ~%R09]
+				  ; Cmpq,  [~$0; ~%R09]
                           ; J Eq,  [~$$"Exit"]
                           ; Jmp,   [~$$"Loop"]
                           ]			  
                     ; text "Loop"
                           [ Cmpq,  [~%R09; ~%R08]
                           ; J Eq,  [~$$"Move Return Value"]
-					                ; J Lt,  [~$$"R9<R8"]
-					                ; J Gt,  [~$$"R9>R8"]
-					                ]
-			              ; text "R9>R8"
+				  ; J Lt,  [~$$"R9<R8"]
+			        ; J Gt,  [~$$"R9>R8"]
+				  ]
+			  ; text "R9>R8"
                           [ Subq,  [~%R09; ~%R08] 
-					                ;	Jmp,   [~$$"Loop"]
+				  ;	Jmp,   [~$$"Loop"]
                           ]
-			              ; text "R9<R8"
+			  ; text "R9<R8"
                           [ Subq,  [~%R08; ~%R09]
-					                ;	Jmp,   [~$$"Loop"]
+				  ;	Jmp,   [~$$"Loop"]
                           ]
-			              ; text "Move Return Value"
-					                [ Movq,  [~%R08; ~%Rax]
-					                ; Jmp,   [~$$"Exit"]
-					                ]
+			  ; text "Move Return Value"
+				  [ Movq,  [~%R08; ~%Rax]
+				  ; Jmp,   [~$$"Exit"]
+				  ]
                     ; text "Exit"
                           [ Retq,  [] ]
 ]

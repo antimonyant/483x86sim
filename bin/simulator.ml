@@ -159,14 +159,6 @@ let addr_space = addr < mem_top && addr >= mem_bot in
   if addr_space then Some(Int64.to_int(Int64.sub addr mem_bot))
   else None
 
-(* Simulates one step of the machine:
-    - fetch the instruction at %rip
-    - compute the source and/or destination information from the operands
-    - simulate the instruction semantics
-    - update the registers and/or memory appropriately
-    - set the condition flags
-*)
-
 (* Stuff for step func *)
 let range_check (num:int64) : int =
 match map_addr num with
@@ -174,7 +166,9 @@ match map_addr num with
 | Some a -> a
   
 let get_range (addr:int64) (m:mach) : int64 =
-  let data = int64_of_sbytes [m.mem.(range_check addr); m.mem.(range_check (Int64.add addr 1L));
+  let data = int64_of_sbytes 
+ [m.mem.(range_check addr); 
+  m.mem.(range_check (Int64.add addr 1L));
   m.mem.(range_check (Int64.add addr 2L)); 
   m.mem.(range_check (Int64.add addr 3L));
   m.mem.(range_check (Int64.add addr 4L)); 
@@ -287,13 +281,13 @@ match opcode with
     set_flags m value
 | Incq -> 
   let dest = interp_op m operator_list 0 in 
-    set_value m operator_list 1 (Int64_overflow.succ dest).Int64_overflow.value;
-    set_flags m (Int64_overflow.succ dest)
+   set_value m operator_list 1 (Int64_overflow.succ dest).Int64_overflow.value;
+   set_flags m (Int64_overflow.succ dest)
 | Decq ->
   let dest = interp_op m operator_list 0 in 
-    set_value m operator_list 0 (Int64_overflow.pred dest).Int64_overflow.value;
-    set_flags m (Int64_overflow.pred dest);
-    if dest = Int64.min_int then m.flags.fo <- true
+   set_value m operator_list 0 (Int64_overflow.pred dest).Int64_overflow.value;
+   set_flags m (Int64_overflow.pred dest);
+   if dest = Int64.min_int then m.flags.fo <- true
 | _ -> failwith "arithmetic should not be here"
   
 let logic (m:mach) (instr:ins) : unit = 
@@ -324,7 +318,8 @@ match opcode with
   
 let msb2_check (dest:int64) : bool =
   (* Get top 2 bits and check if equal*)
-  Int64.shift_right_logical dest 63 = Int64.logand (Int64.shift_right_logical dest 62) 1L
+   dest = Int64.shift_right_logical 
+          (Int64.logand (Int64.shift_right_logical dest 62) 1L) 63
 
 (*stuff for set byte
   - very bad code but have to make it work *)
@@ -332,7 +327,8 @@ let set_byte (op_list:operand list) (num:int) (m:mach) (data:int64) : unit =
 let op = get_element op_list num in
 match op with
 (* ocaml has hex -> clear last 8 bits to set with data *)
-| Reg reg -> m.regs.(rind reg) <- Int64.logor (Int64.logand m.regs.(rind reg) 0xFFFFFF00L) data
+| Reg reg -> m.regs.(rind reg) <- 
+  Int64.logor (Int64.logand m.regs.(rind reg) 0xFFFFFF00L) data
 | _ -> failwith "set_byte should not be here"
 
 let bit_manip (m:mach) (instr:ins) : unit = 
@@ -464,6 +460,14 @@ match b with
 | InsFrag -> m.regs.(rind Rip) <- Int64.add m.regs.(rind Rip) 1L
 | Byte dontcare -> ()
 
+(* Simulates one step of the machine:
+    - fetch the instruction at %rip
+    - compute the source and/or destination information from the operands
+    - simulate the instruction semantics
+    - update the registers and/or memory appropriately
+    - set the condition flags
+*)
+
 let step (m:mach) : unit =
   try
   let get_instr = m.regs.(rind Rip) in
@@ -516,6 +520,7 @@ exception Redefined_sym of lbl
 
 (* Note: Need text size to get data position so need to get that first *)
 
+(* Making another type makes this so much easier *)
 type symbol = lbl * quad
 
 (* Used this to get a sbyte list because I couldn't figure out how otherwise *)
@@ -549,7 +554,7 @@ match op with
 | Ind1 ind1 -> (symbol_table, operands @ 
   [Ind1 (Lit (litvslbl symbol_table ind1))])
 | Ind2 ind2 -> (symbol_table, operands @ [Ind2 ind2])
-| Ind3 (im3,re3) -> (symbol_table, operands @ 
+| Ind3 (im3, re3) -> (symbol_table, operands @ 
   [Ind3 (Lit (litvslbl symbol_table im3), re3)])
 
 let rec lookup (label:lbl) (symbol_table:symbol list) : bool =
@@ -557,30 +562,38 @@ match symbol_table with
 | (lbl, addr)::tl -> if lbl = label then true else lookup lbl tl
 | _ -> false
 
-let patch_text (duple:symbol list  * sbyte list) (instr:ins) : (symbol list  * sbyte list) =
+let patch_text (duple:symbol list * sbyte list) (instr:ins) 
+: (symbol list * sbyte list) =
 let symbol_table, bytes = duple in 
 let opcode, operands = instr in
-let stable, operands = List.fold_left labelstoaddr (symbol_table, []) operands in
-(symbol_table, bytes @ sbytes_of_ins (opcode, operands))
+let stable, operands = List.fold_left labelstoaddr 
+                      (symbol_table, []) operands in
+                      (symbol_table, bytes @ sbytes_of_ins (opcode, operands))
 
-let replace_lbls (duple:symbol list * sbyte list) (p:elem) : (symbol list * sbyte list) =
+let replace_lbls (duple:symbol list * sbyte list) (p:elem) 
+: (symbol list * sbyte list) =
 let symbol_table, texts = duple in
 match p.asm with
 | Text text -> 
-  let updated_symbol_table, patch = List.fold_left patch_text (symbol_table, texts) text in
-  (updated_symbol_table, patch)
+  let updated_symbol_table, patch = 
+    List.fold_left patch_text (symbol_table, texts) text 
+    in
+    (updated_symbol_table, patch)
 | _ -> duple
 
-let symbols_for_text (duple:int64 * symbol list) (p:elem) : (int64 * symbol list) =
-let text_size, symbol_table = duple in
+let symbols_for_text (duple:int64 * symbol list) (p:elem) 
+: (int64 * symbol list) =
+let text_symbols, symbol_table = duple in
 match p.asm with 
 | Text text -> 
   let label = p.lbl in
   let updated_symbol_table = 
-    (* If symbol already in table, raise error *)
+    (* If symbol already in table, raise error *) 
     if (lookup label symbol_table) then raise (Redefined_sym label)
-    else symbol_table @ [(label, text_size)] in 
-    (Int64.add text_size (Int64.mul (Int64.of_int (List.length text)) 8L), updated_symbol_table)
+    else symbol_table @ [(label, text_symbols)] 
+    in 
+    (Int64.add text_symbols (Int64.mul (Int64.of_int 
+                            (List.length text)) 8L), updated_symbol_table)
 | _ -> duple
 
 let symbols_for_data (tuple:int64 * symbol list * sbyte list) (p:elem) 
@@ -590,19 +603,28 @@ match p.asm with
 | Data data -> 
   let label = p.lbl in
   let update_symbol_table = symbol_table @ 
-    [(label, (Int64.add text_size (Int64.of_int (List.length datas))))] in
-  let update_datas = List.fold_left change_type datas data in 
+    [(label, (Int64.add text_size 
+             (Int64.of_int (List.length datas))))] in
+  
+    let update_datas = List.fold_left change_type datas data in 
   (text_size, update_symbol_table, update_datas)
+
   (*Don't change anything here 
     but I don't think it will ever reach this case
   *)
 | _ -> tuple
 
 (* Create symbol table with text and data segments *)
-let resolve_symbols (p:prog) (text_size:int64) : (quad * sbyte list * sbyte list) =
-let text_size, symbol_table, datas = List.fold_left symbols_for_data (text_size, [], []) p in
-let prog_size, update_symbol_table = List.fold_left symbols_for_text (0L, symbol_table) p in
-let replaced_lbls, texts = List.fold_left replace_lbls (update_symbol_table, []) p in
+let resolve_symbols (p:prog) (text_size:int64) 
+: (quad * sbyte list * sbyte list) =
+
+(* Start with empty *)
+let text_size, symbol_table, datas = 
+  List.fold_left symbols_for_data (text_size, [], []) p in
+let prog_size, update_symbol_table = 
+  List.fold_left symbols_for_text (0L, symbol_table) p in
+let replaced_lbls, texts = 
+  List.fold_left replace_lbls (update_symbol_table, []) p in
 (* Find main for start of program *)
   ((litvslbl update_symbol_table (Lbl "main")), texts, datas)
   
